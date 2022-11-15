@@ -20,7 +20,6 @@
 #   FFMPEG_FOUND         - System has the all required components.
 #   FFMPEG_INCLUDE_DIRS  - Include directory necessary for using the required components headers.
 #   FFMPEG_LIBRARIES     - Link these to use the required ffmpeg components.
-#   FFMPEG_LIBRARY_DIRS  - Link directories
 #   FFMPEG_DEFINITIONS   - Compiler switches required for using the required ffmpeg components.
 #
 # For each of the components it will additionally set.
@@ -42,7 +41,6 @@
 #   <component>_FOUND        - System has <component>
 #   <component>_INCLUDE_DIRS - Include directory necessary for using the <component> headers
 #   <component>_LIBRARIES    - Link these to use <component>
-#   <component>_LIBRARY_DIRS - Link directories
 #   <component>_DEFINITIONS  - Compiler switches required for using <component>
 #   <component>_VERSION      - The components version
 #
@@ -90,12 +88,14 @@ endmacro()
 #
 macro(find_component _component _pkgconfig _library _header)
 
-  # use pkg-config to get the directories and then use these values
-  # in the FIND_PATH() and FIND_LIBRARY() calls
-  find_package(PkgConfig)
-  if (PKG_CONFIG_FOUND)
-    pkg_check_modules(PC_${_component} REQUIRED ${_pkgconfig})
-  endif ()
+  #if (NOT WIN32)
+     # use pkg-config to get the directories and then use these values
+     # in the FIND_PATH() and FIND_LIBRARY() calls
+     find_package(PkgConfig)
+     if (PKG_CONFIG_FOUND)
+       pkg_check_modules(PC_${_component} REQUIRED ${_pkgconfig})
+     endif ()
+  #endif (NOT WIN32)
 
   find_path(${_component}_INCLUDE_DIRS ${_header}
     HINTS
@@ -106,28 +106,23 @@ macro(find_component _component _pkgconfig _library _header)
       ffmpeg
   )
 
-  find_library(${_component}_LIBRARY NAMES ${PC_${_component}_LIBRARIES} ${_library}
+  find_library(${_component}_LIBRARIES NAMES ${PC_${_component}_LIBRARIES} ${_library}
       HINTS
       ${PC_${_component}_LIBDIR}
       ${PC_${_component}_LIBRARY_DIRS}
       ${PC_FFMPEG_LIBRARY_DIRS}
   )
 
-  #message(STATUS "L0: ${${_component}_LIBRARIES}")
-  #message(STATUS "L1: ${PC_${_component}_LIBRARIES}")
-  #message(STATUS "L2: ${_library}")
+  #message(STATUS ${${_component}_LIBRARIES})
+  #message(STATUS ${PC_${_component}_LIBRARIES})
 
   set(${_component}_DEFINITIONS  ${PC_${_component}_CFLAGS_OTHER} CACHE STRING "The ${_component} CFLAGS.")
   set(${_component}_VERSION      ${PC_${_component}_VERSION}      CACHE STRING "The ${_component} version number.")
-  set(${_component}_LIBRARY_DIRS ${PC_${_component}_LIBRARY_DIRS} CACHE STRING "The ${_component} library dirs.")
-  set(${_component}_LIBRARIES    ${PC_${_component}_LIBRARIES}    CACHE STRING "The ${_component} libraries.")
 
   set_component_found(${_component})
 
   mark_as_advanced(
-    ${_component}_LIBRARY
     ${_component}_INCLUDE_DIRS
-    ${_component}_LIBRARY_DIRS
     ${_component}_LIBRARIES
     ${_component}_DEFINITIONS
     ${_component}_VERSION)
@@ -151,14 +146,10 @@ if (NOT FFMPEG_LIBRARIES)
   # Check if the required components were found and add their stuff to the FFMPEG_* vars.
   foreach (_component ${FFmpeg_FIND_COMPONENTS})
     if (${_component}_FOUND)
-      message(STATUS "Libs: ${${_component}_LIBRARIES} | ${PC_${_component}_LIBRARIES}")
-
       # message(STATUS "Required component ${_component} present.")
-      set(FFMPEG_LIBRARIES    ${FFMPEG_LIBRARIES}    ${${_component}_LIBRARY} ${${_component}_LIBRARIES})
-      set(FFMPEG_DEFINITIONS  ${FFMPEG_DEFINITIONS}  ${${_component}_DEFINITIONS})
-
+      set(FFMPEG_LIBRARIES   ${FFMPEG_LIBRARIES}   ${${_component}_LIBRARIES})
+      set(FFMPEG_DEFINITIONS ${FFMPEG_DEFINITIONS} ${${_component}_DEFINITIONS})
       list(APPEND FFMPEG_INCLUDE_DIRS ${${_component}_INCLUDE_DIRS})
-      list(APPEND FFMPEG_LIBRARY_DIRS ${${_component}_LIBRARY_DIRS})
 
       string(TOLOWER ${_component} _lowerComponent)
       if (NOT TARGET FFmpeg::${_lowerComponent})
@@ -166,13 +157,12 @@ if (NOT FFMPEG_LIBRARIES)
         set_target_properties(FFmpeg::${_lowerComponent} PROPERTIES
             INTERFACE_COMPILE_OPTIONS "${${_component}_DEFINITIONS}"
             INTERFACE_INCLUDE_DIRECTORIES ${${_component}_INCLUDE_DIRS}
-            INTERFACE_LINK_LIBRARIES "${${_component}_LIBRARY} ${${_component}_LIBRARIES} ${PC_${_component}_LIBRARIES}"
-            INTERFACE_LINK_DIRECTORIES "${PC_${_component}_LIBDIR} ${PC_${_component}_LIBRARY_DIRS} ${PC_FFMPEG_LIBRARY_DIRS}"
-            IMPORTED_LINK_INTERFACE_MULTIPLICITY 3)
+            INTERFACE_LINK_LIBRARIES "${${_component}_LIBRARIES}")
       endif()
-    else()
+
+    else ()
       # message(STATUS "Required component ${_component} missing.")
-    endif()
+    endif ()
   endforeach ()
 
   # Build the include path with duplicates removed.
@@ -184,12 +174,10 @@ if (NOT FFMPEG_LIBRARIES)
   set(FFMPEG_INCLUDE_DIRS ${FFMPEG_INCLUDE_DIRS} CACHE STRING "The FFmpeg include directories." FORCE)
   set(FFMPEG_LIBRARIES    ${FFMPEG_LIBRARIES}    CACHE STRING "The FFmpeg libraries." FORCE)
   set(FFMPEG_DEFINITIONS  ${FFMPEG_DEFINITIONS}  CACHE STRING "The FFmpeg cflags." FORCE)
-  set(FFMPEG_LIBRARY_DIRS ${FFMPEG_LIBRARY_DIRS} CACHE STRING "The FFmpeg library dirs." FORCE)
 
   mark_as_advanced(FFMPEG_INCLUDE_DIRS
                    FFMPEG_LIBRARIES
-                   FFMPEG_DEFINITIONS
-                   FFMPEG_LIBRARY_DIRS)
+                   FFMPEG_DEFINITIONS)
 
 endif ()
 
@@ -198,8 +186,7 @@ if (NOT TARGET FFmpeg::FFmpeg)
   set_target_properties(FFmpeg PROPERTIES
       INTERFACE_COMPILE_OPTIONS "${FFMPEG_DEFINITIONS}"
       INTERFACE_INCLUDE_DIRECTORIES ${FFMPEG_INCLUDE_DIRS}
-      INTERFACE_LINK_LIBRARIES "${FFMPEG_LIBRARIES}"
-      INTERFACE_LINK_DIRECTORIES "${FFMPEG_LIBRARY_DIRS}")
+      INTERFACE_LINK_LIBRARIES "${FFMPEG_LIBRARIES}")
   add_library(FFmpeg::FFmpeg ALIAS FFmpeg)
 endif()
 
