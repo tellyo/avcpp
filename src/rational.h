@@ -5,11 +5,12 @@
 #include <memory>
 #include <type_traits>
 
-#if __cplusplus > 201703L
-#include <compare>
-#endif
-
 #include "ffmpeg.h"
+#include "avutils.h"
+
+#ifdef AVCPP_USE_SPACESHIP_OPERATOR
+#  include <compare>
+#endif
 
 namespace av
 {
@@ -50,7 +51,7 @@ public:
     Rational& operator=  (double value) noexcept;
 
     bool      operator== (const Rational   &other) const noexcept;
-#if __cplusplus > 201703L
+#ifdef AVCPP_USE_SPACESHIP_OPERATOR
     std::strong_ordering operator<=>(const Rational &other) const noexcept
     {
         switch (threewaycmp(other)) {
@@ -144,3 +145,23 @@ inline std::istream& operator>> (std::istream &stream, Rational &value)
 
 
 } // ::av
+
+
+#ifdef __cpp_lib_format
+#include <format>
+// std::format
+template <typename CharT>
+struct std::formatter<av::Rational, CharT>
+{
+    template<typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template<typename ParseContext>
+    auto format(const av::Rational& value, ParseContext& ctx) const
+    {
+        return std::format_to(ctx.out(), "{}/{}", value.getNumerator(), value.getDenominator());
+    }
+};
+#endif

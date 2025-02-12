@@ -13,6 +13,7 @@ extern "C"
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 #include <libavformat/version.h>
+#include <libavcodec/version.h>
 }
 
 extern "C" {
@@ -60,9 +61,6 @@ inline AVMediaType avfilter_pad_get_type(AVFilterPad *pads, int pad_idx)
 #else
 #define avpacket_unref(p) av_packet_unref(p)
 #endif
-
-#define NO_INIT_PACKET (LIBAVCODEC_VERSION_MAJOR >= 60)
-#define DEPRECATED_INIT_PACKET (LIBAVCODEC_VERSION_MAJOR >= 58)
 
 template<typename T>
 struct FFWrapperPtr
@@ -180,12 +178,75 @@ protected:
     T m_fmt = NoneValue;
 };
 
-// Extended attributes
-#if AV_GCC_VERSION_AT_LEAST(3,1)
-#    define attribute_deprecated2(x) __attribute__((deprecated(x)))
-#elif defined(_MSC_VER)
-#    define attribute_deprecated2(x) __declspec(deprecated(x))
-#else
-#    define attribute_deprecated2(x)
-#endif
 
+#ifdef __cpp_lib_format
+#    include <format>
+
+namespace av {
+
+template <typename B>
+concept has_name_method_with_ec = requires(const B& type, std::error_code ec) {
+    { type.name(ec) } -> std::convertible_to<std::string_view>;
+};
+
+template <typename B>
+concept has_name_method_without_ec = requires(const B& type) {
+    { type.name() } -> std::convertible_to<std::string_view>;
+};
+
+template <typename B>
+concept has_long_name_method_with_ec = requires(const B& type, std::error_code ec) {
+    { type.longName(ec) } -> std::convertible_to<std::string_view>;
+};
+
+template <typename B>
+concept has_long_name_method_without_ec = requires(const B& type) {
+    { type.longName() } -> std::convertible_to<std::string_view>;
+};
+} // ::av
+
+template <class T, class CharT>
+    requires av::has_name_method_with_ec<T> || av::has_name_method_without_ec<T>
+struct std::formatter<T, CharT>
+{
+    bool longName = false;
+
+    template<typename ParseContext>
+    constexpr ParseContext::iterator parse(ParseContext& ctx)
+    {
+        auto it = ctx.begin();
+        if constexpr (requires { requires av::has_long_name_method_with_ec<T> || av::has_long_name_method_without_ec<T>; }) {
+            if (it == ctx.end())
+                return it;
+            if (*it == 'l') {
+                longName = true;
+                ++it;
+            }
+            if (it != ctx.end() && *it != '}')
+                throw std::format_error("Invalid format args");
+        }
+        return it;
+    }
+
+    template<typename ParseContext>
+    auto format(const T& value, ParseContext& ctx) const
+    {
+        if (longName) {
+            if constexpr (requires { requires av::has_long_name_method_with_ec<T>; }) {
+                std::error_code dummy;
+                return std::format_to(ctx.out(), "{}", value.longName(dummy));
+            } else if constexpr (requires { requires av::has_long_name_method_without_ec<T>; }) {
+                return std::format_to(ctx.out(), "{}", value.longName());
+            }
+        } else {
+            if constexpr (requires { requires av::has_name_method_with_ec<T>; }) {
+                std::error_code dummy;
+                return std::format_to(ctx.out(), "{}", value.name(dummy));
+            } else {
+                return std::format_to(ctx.out(), "{}", value.name());
+            }
+        }
+        return ctx.out();
+    }
+};
+#endif

@@ -168,6 +168,23 @@ int avcodec_encode_audio_legacy(AVCodecContext *avctx, AVPacket *avpkt,
 
 namespace av {
 
+namespace codec_context::internal {
+const int *get_supported_samplerates(const struct AVCodec *codec)
+{
+    const int *sampleRates = nullptr;
+
+#if API_AVCODEC_GET_SUPPORTED_CONFIG
+    avcodec_get_supported_config(nullptr, codec,
+                                 AV_CODEC_CONFIG_SAMPLE_RATE, 0,
+                                 reinterpret_cast<const void**>(&sampleRates), nullptr);
+#else
+    sampleRates = codec->supported_samplerates;
+#endif
+
+    return sampleRates;
+}
+
+} // codec_context::internal
 
 VideoDecoderContext::VideoDecoderContext(VideoDecoderContext &&other)
     : Parent(std::move(other))
@@ -383,10 +400,24 @@ void CodecContext2::setCodec(const Codec &codec, bool resetDefaults, Direction d
         m_raw->codec      = codec.raw();
 
         if (!codec.isNull()) {
-            if (codec.raw()->pix_fmts != 0)
-                m_raw->pix_fmt = *(codec.raw()->pix_fmts); // assign default value
-            if (codec.raw()->sample_fmts != 0)
-                m_raw->sample_fmt = *(codec.raw()->sample_fmts);
+            const enum AVPixelFormat *pixFmts = nullptr;
+            const enum AVSampleFormat *sampleFmts = nullptr;
+
+#if API_AVCODEC_GET_SUPPORTED_CONFIG
+            avcodec_get_supported_config(nullptr, codec.raw(),
+                                         AV_CODEC_CONFIG_PIX_FORMAT, 0,
+                                         reinterpret_cast<const void**>(&pixFmts), nullptr);
+            avcodec_get_supported_config(nullptr, codec.raw(),
+                                         AV_CODEC_CONFIG_SAMPLE_FORMAT, 0,
+                                         reinterpret_cast<const void**>(&sampleFmts), nullptr);
+#else
+            pixFmts = codec.raw()->pix_fmts;
+            sampleFmts = codec.raw()->sample_fmts;
+#endif
+            if (pixFmts)
+                m_raw->pix_fmt = *(pixFmts); // assign default value
+            if (sampleFmts)
+                m_raw->sample_fmt = *(sampleFmts);
         }
     }
 
@@ -448,12 +479,71 @@ void CodecContext2::open(Dictionary &options, const Codec &codec, OptionalErrorC
     options.assign(prt);
 }
 
+namespace {
+// Close code in new way: recreate context with parameters coping
+// Use legacy avcodec_close() for old ffmpeg versions.
+int codec_close(AVCodecContext*& ctx)
+{
+#if API_AVCODEC_CLOSE
+    return avcodec_close(ctx);
+#else
+    AVCodecContext *ctxNew = nullptr;
+    AVCodecParameters *parTmp = nullptr;
+
+    int ret;
+
+    ctxNew = avcodec_alloc_context3(ctx->codec);
+    if (!ctxNew) {
+        ret = AVERROR(ENOMEM);
+        goto fail;
+    }
+
+    parTmp = avcodec_parameters_alloc();
+    if (!parTmp) {
+        ret = AVERROR(ENOMEM);
+        goto fail;
+    }
+
+    ret = avcodec_parameters_from_context(parTmp, ctx);
+    if (ret < 0)
+        goto fail;
+
+    ret = avcodec_parameters_to_context(ctxNew, parTmp);
+    if (ret < 0)
+        goto fail;
+
+    ctxNew->pkt_timebase = ctx->pkt_timebase;
+
+
+#if (LIBAVCODEC_VERSION_MAJOR < 61) || (defined(FF_API_TICKS_PER_FRAME) && FF_API_TICKS_PER_FRAME)
+FF_DISABLE_DEPRECATION_WARNINGS
+    ctxNew->ticks_per_frame = ctx->ticks_per_frame;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+
+    avcodec_free_context(&ctx);
+    ctx = ctxNew;
+
+    ctxNew = nullptr;
+    ret      = 0;
+
+fail:
+    avcodec_free_context(&ctxNew);
+    avcodec_parameters_free(&parTmp);
+
+    return ret;
+#endif
+}
+}
+
 void CodecContext2::close(OptionalErrorCode ec)
 {
     clear_if(ec);
     if (isOpened())
     {
-        avcodec_close(m_raw);
+        if (auto sts = codec_close(m_raw); sts) {
+            throws_if(ec, sts, ffmpeg_category());
+        }
         return;
     }
     throws_if(ec, Errors::CodecNotOpened);
@@ -959,7 +1049,14 @@ CodecContext2::encodeCommon(Packet &outPacket,
         outPacket.setStreamIndex(inFrame.streamIndex());
     } else if (m_stream.isValid()) {
 #if USE_CODECPAR
+#if API_AVFORMAT_AV_STREAM_GET_CODEC_TIMEBASE
         outPacket.setTimeBase(av_stream_get_codec_timebase(m_stream.raw()));
+#else
+        // TBD: additional checking are needed
+        if (timeBase() != Rational{}) {
+            outPacket.setTimeBase(timeBase());
+        }
+#endif
 #else
         FF_DISABLE_DEPRECATION_WARNINGS
         if (m_stream.raw()->codec) {
