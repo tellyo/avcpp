@@ -1019,7 +1019,8 @@ CodecContext2::decodeCommon(T &outFrame,
         frame->pts = frame->pkt_dts;
 
     // Convert to decoder/frame time base. Seems not nessesary.
-    outFrame.setTimeBase(timeBase());
+    // disabled due to inaccurate seeks for some streams
+    //outFrame.setTimeBase(timeBase());
 
     if (inPacket)
         outFrame.setStreamIndex(inPacket.streamIndex());
