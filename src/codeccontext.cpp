@@ -233,8 +233,6 @@ VideoFrame VideoDecoderContext::decodeVideo(OptionalErrorCode ec, const Packet &
     if (!gotFrame)
         return VideoFrame();
 
-    outFrame.setPictureType(AV_PICTURE_TYPE_I);
-
     if (decodedBytes)
         *decodedBytes = get<0>(st);
 
