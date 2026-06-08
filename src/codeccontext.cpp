@@ -1,3 +1,4 @@
+#include <memory>
 #include <stdexcept>
 
 #include "avlog.h"
@@ -863,16 +864,25 @@ std::pair<int, const error_category *> CodecContext2::decodeCommon(AVFrame *outF
     if (!decodeProc)
         return make_error_pair(Errors::CodecInvalidDecodeProc);
 
-    if (offset && inPacket.size() && offset >= inPacket.size())
-        return make_error_pair(Errors::CodecDecodingOffsetToLarge);
-
+    std::unique_ptr<AVPacket, av::SmartDeleter> pkt;
+    const AVPacket *processPkt = inPacket.raw();
     frameFinished = 0;
 
-    AVPacket pkt = *inPacket.raw();
-    pkt.data += offset;
-    pkt.size -= offset;
+    if (inPacket.raw() && offset) {
+        if (offset && inPacket.size() && offset >= inPacket.size())
+            return make_error_pair(Errors::CodecDecodingOffsetToLarge);
 
-    int decoded = decodeProc(m_raw, outFrame, &frameFinished, &pkt);
+        std::error_code ec;
+        pkt.reset(inPacket.makeRef(ec));
+        if (ec)
+            return {ec.value(), &ec.category()};
+
+        pkt->data += offset;
+        pkt->size -= offset;
+        processPkt = pkt.get();
+    }
+
+    int decoded = decodeProc(m_raw, outFrame, &frameFinished, processPkt);
     return make_error_pair(decoded);
 }
 
@@ -998,7 +1008,7 @@ CodecContext2::decodeCommon(T &outFrame,
 
     // Dial with PTS/DTS in packet/stream timebase
 
-    if (inPacket.timeBase() != Rational())
+    if (inPacket.raw() && inPacket.timeBase() != Rational())
         outFrame.setTimeBase(inPacket.timeBase());
     else
         outFrame.setTimeBase(m_stream.timeBase());
@@ -1020,7 +1030,7 @@ CodecContext2::decodeCommon(T &outFrame,
     // disabled due to inaccurate seeks for some streams
     //outFrame.setTimeBase(timeBase());
 
-    if (inPacket)
+    if (inPacket.raw() && inPacket)
         outFrame.setStreamIndex(inPacket.streamIndex());
     else
         outFrame.setStreamIndex(m_stream.index());

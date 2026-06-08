@@ -4,6 +4,15 @@ using namespace std;
 
 namespace av {
 
+#if API_AVCODEC_NEW_INIT_PACKET
+Packet::Packet(std::nullptr_t)
+    : FFWrapperPtr<AVPacket>(nullptr),
+      m_completeFlag(false),
+      m_timeBase(0, 0)
+{
+}
+#endif
+
 Packet::Packet()
 {
 #if API_AVCODEC_NEW_INIT_PACKET

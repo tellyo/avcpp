@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 #include "ffmpeg.h"
@@ -36,6 +37,10 @@ public:
      * Buffer size must be: size + AV_INPUT_BUFFER_PADDING_SIZE
      */
     struct wrap_data_static {};
+
+#if API_AVCODEC_NEW_INIT_PACKET
+    explicit Packet(std::nullptr_t); // receive-only packet; does not flush decoder
+#endif
 
     Packet();
     Packet(const Packet &packet, OptionalErrorCode ec);
@@ -133,4 +138,3 @@ private:
 
 
 } // ::av
-
