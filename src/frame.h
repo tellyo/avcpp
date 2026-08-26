@@ -79,6 +79,28 @@ static inline bool is_valid_channel_layout(const AVFrame *frame)
 #endif
 }
 
+// MXF and similar sources often report a channel count with no layout
+// (AV_CHANNEL_ORDER_UNSPEC). swresample and AudioResampler require a native
+// bitmask, so fill the FFmpeg default (1ch=mono, 2ch=stereo, ...).
+static inline void ensure_default_channel_layout(AVFrame* frame)
+{
+    if (!frame)
+        return;
+    const int channels = get_channels(frame);
+    if (channels <= 0)
+        return;
+#if API_NEW_CHANNEL_LAYOUT
+    if (frame->ch_layout.order != AV_CHANNEL_ORDER_UNSPEC)
+        return;
+    av_channel_layout_uninit(&frame->ch_layout);
+    av_channel_layout_default(&frame->ch_layout, channels);
+#else
+    if (get_channel_layout(frame))
+        return;
+    set_channel_layout(frame, av_get_default_channel_layout(channels));
+#endif
+}
+
 static inline int get_sample_rate(const AVFrame* frame) {
 #if LIBAVUTIL_VERSION_MAJOR < 56 // < FFmpeg 4.0
     return av_frame_get_sample_rate(frame);
